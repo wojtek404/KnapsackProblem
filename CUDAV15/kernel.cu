@@ -6,6 +6,9 @@
 #include <stdio.h>
 #include <iostream>
 #include <algorithm>
+#include <thread>
+
+#include <boost\thread\barrier.hpp>
 
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
@@ -19,6 +22,7 @@ using namespace std;
 
 void performKnapsackDynamicCudaCalculations(const string& dirName, vector<string>& fileNames);
 void performKnapsackDynamicCPUCalculations(const string& dirName, vector<string>& fileNames);
+void performKnapsackParallelDynamicCPUCalculations(const string& dirName, vector<string>& fileNames, unsigned threadCount);
 cudaError_t knapsackCudaDynamic(int *output, const int *val, const int *wt, unsigned int n, unsigned int W);
 
 void performKnapsackSortingCudaCalculations(const string& dirName, vector<string>& fileNames);
@@ -30,7 +34,7 @@ __device__ int maxi(int a, int b) {
 
 __global__ void knapsackDynamicKernelPrepare(int *output, int n, int W) {
 	int w = blockIdx.x * blockDim.x + threadIdx.x;
-	if (w > W + 1) return;
+	if (w > W) return;
 
 	output[w] = -1;
 	if (w == 0)
@@ -39,7 +43,7 @@ __global__ void knapsackDynamicKernelPrepare(int *output, int n, int W) {
 
 __global__ void knapsackDynamicKernel(int *wt, int *val, int *output, int i, int n, int W) {
 	int w = blockIdx.x * blockDim.x + threadIdx.x;
-	if (w > W + 1) return;
+	if (w > W) return;
 	int currentIndex = (i % 2)*(W + 1) + w;
 	int previousIndex = ((i - 1) % 2)*(W + 1) + w;
 
@@ -56,7 +60,7 @@ int main() {
 	read_directory("low_dimensional", lowDimensional);
 	read_directory("large_scale", largeScale);
 
-	std::cout << "===DANE MALEJ SKALI - PODEJSCIE DYNAMICZNE - CUDA===" << endl;
+	/*std::cout << "===DANE MALEJ SKALI - PODEJSCIE DYNAMICZNE - CUDA===" << endl;
 	performKnapsackDynamicCudaCalculations("low_dimensional", lowDimensional);
 	std::cout << endl << "===DANE DUZEJ SKALI - PODEJSCIE DYNAMICZNE - CUDA===" << endl;
 	performKnapsackDynamicCudaCalculations("large_scale", largeScale);
@@ -66,10 +70,17 @@ int main() {
 	std::cout << endl << "===DANE DUZEJ SKALI - PODEJSCIE DYNAMICZNE - CPU===" << endl;
 	performKnapsackDynamicCPUCalculations("large_scale", largeScale);
 
-	std::cout << endl << "===DANE MALEJ SKALI - PODEJSCIE APROKSYMACYJNE - CUDA===" << endl;
+	for (unsigned i = 2; i <= 8; i *= 2) {
+		std::cout << "===DANE MALEJ SKALI - PODEJSCIE DYNAMICZNE - CPU "<< i << "===" << endl;
+		performKnapsackParallelDynamicCPUCalculations("low_dimensional", lowDimensional, i);
+		std::cout << endl << "===DANE DUZEJ SKALI - PODEJSCIE DYNAMICZNE - CPU " << i << "===" << endl;
+		performKnapsackParallelDynamicCPUCalculations("large_scale", largeScale, i);
+	}*/
+
+	/*std::cout << endl << "===DANE MALEJ SKALI - PODEJSCIE APROKSYMACYJNE - CUDA===" << endl;
 	performKnapsackSortingCudaCalculations("low_dimensional", lowDimensional);
 	std::cout << endl << "===DANE DUZEJ SKALI - PODEJSCIE APROKSYMACYJNE - CUDA===" << endl;
-	performKnapsackSortingCudaCalculations("large_scale", largeScale);
+	performKnapsackSortingCudaCalculations("large_scale", largeScale);*/
 
 	std::cout << endl << "===DANE MALEJ SKALI - PODEJSCIE APROKSYMACYJNE - CPU===" << endl;
 	performKnapsackSortingCPUCalculations("low_dimensional", lowDimensional);
@@ -145,6 +156,7 @@ void performKnapsackSortingCPUCalculations(const string& dirName, vector<string>
 			output[i] = pair<int, float>(i, float(values[i]) / float(weights[i]));
 		}
 		std::sort(output, output + n, wayToSort);
+		//boost::sort::parallel_stable_sort(output, output + n, 1);
 
 		unsigned int weight = 0, maxValue = 0;
 		for (auto i = 0; i < n; ++i) {
@@ -227,20 +239,100 @@ void performKnapsackDynamicCPUCalculations(const string& dirName, vector<string>
 
 		auto start = std::chrono::system_clock::now();
 
-		for (int i = 0; i <= n; ++i) {
-			for (int w = 0; w <= W + 1; ++w) {
+		for (int w = 0; w <= W; ++w) {
+			output[w] = -1;
+
+		}
+		output[0] = 0;
+
+		for (int i = 1; i <= n; ++i) {
+			for (int w = 0; w < W + 1; ++w) {
 				int currentIndex = (i % 2)*(W + 1) + w;
 				int previousIndex = ((i - 1) % 2)*(W + 1) + w;
-				if (i == 0 || w == 0) {
-					output[currentIndex] = -1;
-					if (w == 0)
-						output[currentIndex] = 0;
-				}
-				else if (w - weights[i - 1] < 0 || output[previousIndex - weights[i - 1]] < 0)
+
+				if (w - weights[i - 1] < 0 || output[previousIndex - weights[i - 1]] < 0)
 					output[currentIndex] = output[previousIndex];
 				else
 					output[currentIndex] = max(values[i - 1] + output[previousIndex - weights[i - 1]], output[previousIndex]);
 			}
+		}
+
+		int max = -1;
+		for (int j = 0; j <= W; j++) {
+			//std::cout << output[(n % 2)*W + j] << " ";
+			if (max < output[(n % 2)*W + j]) {
+				max = output[(n % 2)*W + j];
+			}
+		}
+
+		auto end = std::chrono::system_clock::now();
+		auto elapsed = chrono::duration_cast<chrono::microseconds>(end - start).count();
+
+		std::cout << StringPadding(to_string(elapsed), 14);
+		std::cout << StringPadding(to_string(expectedResult), 10) << StringPadding(to_string(max), 10) << StringPadding(to_string((int)expectedResult - max), 10) << std::endl;
+
+		delete[] values;
+		delete[] weights;
+		delete[] output;
+	}
+}
+
+boost::mutex io_mutex;
+
+void dynamicCPUThread(boost::barrier &b, int* values, int* weights, int* output, const unsigned &n, const unsigned &W, const unsigned &threadCount, const int start, const int end) {
+	for (int i = 1; i <= n; ++i) {
+		//cout << i << " ";
+		b.wait();
+		for (int w = start; w < end; ++w) {
+			int currentIndex = (i % 2)*(W + 1) + w;
+			int previousIndex = ((i - 1) % 2)*(W + 1) + w;
+
+			if (w - weights[i - 1] < 0 || output[previousIndex - weights[i - 1]] < 0)
+				output[currentIndex] = output[previousIndex];
+			else
+				output[currentIndex] = max(values[i - 1] + output[previousIndex - weights[i - 1]], output[previousIndex]);
+		}
+	}
+}
+
+void performKnapsackParallelDynamicCPUCalculations(const string& dirName, vector<string>& fileNames, unsigned threadCount) {
+	std::cout << StringPadding("file", 25) << StringPadding("n", 8) << StringPadding("W", 10)
+		<< StringPadding("time(ms)", 14) << StringPadding("expected", 10) << StringPadding("obtained", 10)
+		<< StringPadding("error(\%)", 10) << endl;
+	for (auto it = fileNames.begin(); it != fileNames.end(); it++) {
+		unsigned int n, W, expectedResult;
+		int *values, *weights;
+
+		auto ret = loadData(dirName, (*it), n, W, expectedResult);
+		values = ret.first;
+		weights = ret.second;
+
+		int *output = new int[2 * (W + 1) * sizeof(int)];
+		std::cout << StringPadding((*it), 25) << StringPadding(to_string(n), 8) << StringPadding(to_string(W), 10);
+
+		auto start = std::chrono::system_clock::now();
+
+		for (int w = 0; w <= W; ++w) {
+			output[w] = -1;
+
+		}
+		output[0] = 0;
+
+		vector<thread> threads;
+		boost::barrier b(threadCount);
+		//dynamicCPUThread(int* values, int* weights, int* output, int &i, int &W, int start, int end)
+		for (int j = 0; j < threadCount-1; ++j) {
+			thread t(&dynamicCPUThread, ref(b), values, weights, output, ref(n), ref(W), ref(threadCount),
+				int(W/threadCount)*j, int(W / threadCount)*(j+1));
+			//cout << "Starts " << int(W / threadCount)*j << "-" << int(W / threadCount)*(j + 1) << endl;
+			threads.push_back(move(t));
+		}
+		thread t(&dynamicCPUThread, ref(b), values, weights, output, ref(n), ref(W), ref(threadCount),
+			int(W / threadCount)*(threadCount - 1), int(W + 1));
+		//cout << "Starts " << int(W / threadCount)*(threadCount - 1) << "-" << int(W + 2) << endl;
+		threads.push_back(move(t));
+		for (auto it = threads.begin(); it != threads.end(); ++it) {
+			(*it).join();
 		}
 
 		int max = -1;
