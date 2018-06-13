@@ -2,6 +2,7 @@
 #define __CUDACC__
 #endif
 #include "utilities.h"
+#include "parasort.h"
 
 #include <stdio.h>
 #include <iostream>
@@ -9,6 +10,7 @@
 #include <thread>
 
 #include <boost\thread\barrier.hpp>
+#include <boost\sort\sort.hpp>
 
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
@@ -26,7 +28,7 @@ void performKnapsackParallelDynamicCPUCalculations(const string& dirName, vector
 cudaError_t knapsackCudaDynamic(int *output, const int *val, const int *wt, unsigned int n, unsigned int W);
 
 void performKnapsackSortingCudaCalculations(const string& dirName, vector<string>& fileNames);
-void performKnapsackSortingCPUCalculations(const string& dirName, vector<string>& fileNames);
+void performKnapsackSortingCPUCalculations(const string& dirName, vector<string>& fileNames, unsigned threadCount);
 
 __device__ int maxi(int a, int b) {
 	return (a > b) ? a : b;
@@ -56,36 +58,54 @@ __global__ void knapsackDynamicKernel(int *wt, int *val, int *output, int i, int
 
 int main() {
 	//generateRandomDataFile("myDataSet1", 100000, 5000000);
-	vector<string> lowDimensional, largeScale;
+	//generateRandomDataFile("myDataSet2", 1000000, 500000);
+	//generateRandomDataFile("myDataSet3", 100000, 2000000);
+	//generateRandomDataFile("myDataSet4", 1000000, 2000000);
+	vector<string> lowDimensional, largeScale, hugeScale;
 	read_directory("low_dimensional", lowDimensional);
 	read_directory("large_scale", largeScale);
+	read_directory("huge_scale", hugeScale);
 
-	/*std::cout << "===DANE MALEJ SKALI - PODEJSCIE DYNAMICZNE - CUDA===" << endl;
+	std::cout << "===DANE MALEJ SKALI - PODEJSCIE DYNAMICZNE - CUDA===" << endl;
 	performKnapsackDynamicCudaCalculations("low_dimensional", lowDimensional);
 	std::cout << endl << "===DANE DUZEJ SKALI - PODEJSCIE DYNAMICZNE - CUDA===" << endl;
 	performKnapsackDynamicCudaCalculations("large_scale", largeScale);
+	std::cout << endl << "===W£ASNE DANE DUZEJ SKALI - PODEJSCIE DYNAMICZNE - CUDA===" << endl;
+	performKnapsackDynamicCudaCalculations("huge_scale", hugeScale);
 
 	std::cout << "===DANE MALEJ SKALI - PODEJSCIE DYNAMICZNE - CPU===" << endl;
 	performKnapsackDynamicCPUCalculations("low_dimensional", lowDimensional);
 	std::cout << endl << "===DANE DUZEJ SKALI - PODEJSCIE DYNAMICZNE - CPU===" << endl;
 	performKnapsackDynamicCPUCalculations("large_scale", largeScale);
+	//std::cout << endl << "===W£ASNE DANE DUZEJ SKALI - PODEJSCIE DYNAMICZNE - CPU===" << endl;
+	//performKnapsackDynamicCPUCalculations("huge_scale", hugeScale);
 
-	for (unsigned i = 2; i <= 8; i *= 2) {
+	for (unsigned i = 2; i <= 4; i *= 2) {
 		std::cout << "===DANE MALEJ SKALI - PODEJSCIE DYNAMICZNE - CPU "<< i << "===" << endl;
 		performKnapsackParallelDynamicCPUCalculations("low_dimensional", lowDimensional, i);
 		std::cout << endl << "===DANE DUZEJ SKALI - PODEJSCIE DYNAMICZNE - CPU " << i << "===" << endl;
 		performKnapsackParallelDynamicCPUCalculations("large_scale", largeScale, i);
-	}*/
+	}
+	for (unsigned i = 4; i <= 4; i *= 2) {
+		std::cout << endl << "===W£ASNE DANE DUZEJ SKALI - PODEJSCIE DYNAMICZNE - CPU " << i << "===" << endl;
+		performKnapsackParallelDynamicCPUCalculations("huge_scale", hugeScale, i);
+	}
 
-	/*std::cout << endl << "===DANE MALEJ SKALI - PODEJSCIE APROKSYMACYJNE - CUDA===" << endl;
+	std::cout << endl << "===DANE MALEJ SKALI - PODEJSCIE APROKSYMACYJNE - CUDA===" << endl;
 	performKnapsackSortingCudaCalculations("low_dimensional", lowDimensional);
 	std::cout << endl << "===DANE DUZEJ SKALI - PODEJSCIE APROKSYMACYJNE - CUDA===" << endl;
-	performKnapsackSortingCudaCalculations("large_scale", largeScale);*/
+	performKnapsackSortingCudaCalculations("large_scale", largeScale);
+	std::cout << endl << "===W£ASNE DANE DUZEJ SKALI - PODEJSCIE APROKSYMACYJNE - CUDA===" << endl;
+	performKnapsackSortingCudaCalculations("huge_scale", hugeScale);
 
-	std::cout << endl << "===DANE MALEJ SKALI - PODEJSCIE APROKSYMACYJNE - CPU===" << endl;
-	performKnapsackSortingCPUCalculations("low_dimensional", lowDimensional);
-	std::cout << endl << "===DANE DUZEJ SKALI - PODEJSCIE APROKSYMACYJNE - CPU===" << endl;
-	performKnapsackSortingCPUCalculations("large_scale", largeScale);
+	for (unsigned i = 1; i <= 4; i *= 2) {
+		std::cout << endl << "===DANE MALEJ SKALI - PODEJSCIE APROKSYMACYJNE - CPU " << i << "===" << endl;
+		performKnapsackSortingCPUCalculations("low_dimensional", lowDimensional, i);
+		std::cout << endl << "===DANE DUZEJ SKALI - PODEJSCIE APROKSYMACYJNE - CPU " << i << "===" << endl;
+		performKnapsackSortingCPUCalculations("large_scale", largeScale, i);
+		std::cout << endl << "===W£ASNE DANE DUZEJ SKALI - PODEJSCIE APROKSYMACYJNE - CPU " << i << "===" << endl;
+		performKnapsackSortingCPUCalculations("huge_scale", hugeScale, i);
+	}
 	
 	system("pause");
 	return 0;
@@ -133,9 +153,9 @@ void performKnapsackSortingCudaCalculations(const string& dirName, vector<string
 	}
 }
 
-bool wayToSort(pair<int, float> i, pair<int, float> j) { return i.second > j.second; }
+bool wayToSort(pair<float, int> i, pair<float, int> j) { return i.first > j.first; }
 
-void performKnapsackSortingCPUCalculations(const string& dirName, vector<string>& fileNames) {
+void performKnapsackSortingCPUCalculations(const string& dirName, vector<string>& fileNames, unsigned threadCount) {
 	std::cout << StringPadding("file", 25) << StringPadding("n", 8) << StringPadding("W", 10)
 		<< StringPadding("time(ms)", 14) << StringPadding("expected", 10) << StringPadding("obtained", 10)
 		<< StringPadding("error(\%)", 10) << endl;
@@ -151,18 +171,24 @@ void performKnapsackSortingCPUCalculations(const string& dirName, vector<string>
 
 		auto start = std::chrono::system_clock::now();
 
-		pair<int, float> *output = new pair<int, float>[n];
+		pair<float, int> *output = new pair<float, int>[n];
 		for (int i = 0; i < n; ++i) {
-			output[i] = pair<int, float>(i, float(values[i]) / float(weights[i]));
+			output[i] = pair<float, int>(float(values[i]) / float(weights[i]), i);
 		}
-		std::sort(output, output + n, wayToSort);
-		//boost::sort::parallel_stable_sort(output, output + n, 1);
+		if (threadCount == 1) {
+			std::sort(output, output + n, wayToSort);
+		}
+		else {
+			parasort(n, output, threadCount);
+			std::reverse(output, output + n);
+		}
 
 		unsigned int weight = 0, maxValue = 0;
 		for (auto i = 0; i < n; ++i) {
-			if (weight + weights[output[i].first] <= W) {
-				weight += weights[output[i].first];
-				maxValue += values[output[i].first];
+			//cout << output[i].first << " ";
+			if (weight + weights[output[i].second] <= W) {
+				weight += weights[output[i].second];
+				maxValue += values[output[i].second];
 			}
 		}
 
